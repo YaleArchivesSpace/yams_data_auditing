@@ -12,19 +12,19 @@ A process to identify and normalize unstructured dates in ArchivesSpace.
 * Ruby 2.0+
 * [Timetwister](https://github.com/alexduryee/timetwister)
 
-**NOTE:** This script was written on/for the OSX operating system. It may work on a PC but it has not yet been tested.
+**NOTE:** `parse_dates.py` was written for OS X. It may work on a PC but it has not yet been tested.
 
 ## Tutorial
 
 ### Step 1: Identifying unstructured dates with `get_unstructured_dates.sql`
 
-This query will return a report of all date records in ArchivesSpace which have a value in the _expression_ field but which do not have values in the _begin_ or _end_ fields.
+Returns a report of all date records in ArchivesSpace which have a value in the _expression_ field but which do not have values in the _begin_ or _end_ fields.
 
-The output of this report should be used as the input for `parse_dates.py`.
+Output of query should be used as the input for `parse_dates.py`.
 
 ### Step 2: Parsing unstructured dates with `parse_dates.py`
 
-To run this script:
+To run:
 
 ```
 $ cd git/yams_data_auditing/dates
@@ -32,14 +32,16 @@ $ python parse_dates.py
 ``` 
 Follow the prompts in the terminal:
 
-1. _Please enter path to log file_ - enter the desired file name or path for your log file. Ex: _log.log_ or _/Users/username/folder/log.log
+1. _Please enter path to log file_ - enter the desired file name or path for your log file. Ex: _log.log_ or _/Users/username/folder/log.log_
 2. _Please enter path to CSV_ - enter the filename or path to your input CSV file.
 3. _Please enter path to output CSV_ -  enter the filename or path to your output CSV file
-4. _Enter "Y" to split output into multiple spreadsheets by date type, or any key to continue_ - indicate whether you'd like a set of subreports to be produced in addition to the output CSV. These subreports are used as input for the SQL update scripts described below.
+4. _Enter "Y" to split output into multiple spreadsheets by date type, or any key to continue_ - indicate whether you'd like a set of subreports to be produced in addition to the output CSV. These subreports are used as input for the database update scripts described below.
 
 ### Step 3a: Updating dates via the ArchivesSpace database
 
-This is the most accurate method to update records in the date table, as it uses the date subrecord's database ID to identify and update the record. However, subrecords in ArchivesSpace are not persistent - every time a top-level record (resource, archival object, etc.) is saved, all associated subrecords are deleted and recreated, and thus are assigned a new database ID. It is recommended to run the `parse_dates.py` script as close to the time of update as possible, so that fewer database IDs will have changed. It may be useful to run the `parse_dates.py` script, perform quality control on the results, and then run it again immediately before the SQL update.
+This is the most accurate method to update records in the date table, as it uses the date subrecord's database ID to identify and update the record. 
+
+However, subrecords in ArchivesSpace are not persistent - every time a top-level record (resource, archival object, etc.) is saved, all of its subrecords are deleted and recreated, and thus are assigned new database IDs. It is recommended to run the `parse_dates.py` script as close to update as possible, so that fewer database IDs will have changed. It may be useful to run the `parse_dates.py` script, perform quality control on the results, and then run it again immediately before update.
 
 #### Preparing inputs
 
@@ -59,7 +61,7 @@ Reports 1-4 have date type IDs added, and can be used as input for the `update_d
 
 Execute this script in a MySQL client or CLI. Be sure to comment out the correct lines depending on the date type. Create different temporary tables for inclusive and single date records.
 
-Once the temporary tables are created, import your input spreadsheets into the tables. The exact process for doing this will depend on the MySQL client you are using.
+Once the temporary tables are created, import the input spreadsheets into the tables. The process for doing this will depend on your MySQL client.
 
 #### Running `update_dates.sql`
 
@@ -67,15 +69,15 @@ Execute this script to update your database. Be sure to comment out the correct 
 
 ### Step 3b: Updating dates via the ArchivesSpace API
 
-This method of updating date subrecords is less accurate, as it requires matching by URI and date expression, a free-text field, rather than by the date ID. However, users may favor this option if performing an SQL update is undesirable, and if there is concern about the changing of date subrecord database IDs.
+This method is less accurate, as it requires matching by URI and date expression, a free-text field, rather than by the date ID. However, users may favor this option if performing an SQL update is undesirable, and if there is concern about changing date IDs.
 
 #### Preparing inputs
 
-It is ok to use the `parse_dates.py` master report for all date types, though the subreports can also be used. If using the master report, delete all 'None' strings in the CSV. Will soon update the script so these are removed before the reports are written.
+It is ok to use either the master report or the subreports as input. If using the master report, date type IDs may need to be added depending on the existing data. Will soon update `parse_dates.py` so this info is added to the master report.
 
 #### Running `update_dates_by_expression.py`
 
-To run this script:
+To run:
 
 ```
 $ cd git/yams_data_auditing/dates
@@ -83,7 +85,7 @@ $ python update_dates_by_expression.py
 ``` 
 Follow the prompts in the terminal:
 
-* _Please enter path to log file_- enter the desired file name or path for your log file. Ex: _log.log_ or _/Users/username/folder/log.log
+* _Please enter path to log file_- enter the desired file name or path for your log file. Ex: _log.log_ or _/Users/username/folder/log.log_
 * _Please enter the ArchivesSpace API URL_ - enter your ArchivesSpace API URL
 * _Please enter your username_ - enter your ArchivesSpace username
 * _Please enter your password_ - enter your ArchivesSpace password
