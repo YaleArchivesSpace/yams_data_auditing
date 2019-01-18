@@ -50,16 +50,16 @@ def opencsv():
         return c
 
 #Open a CSV file in writer mode
-def opencsvout():
+def opencsvout(output_csv=None):
     try:
-        output_csv = input('Please enter path to output CSV: ')
+        if output_csv is None:
+            output_csv = input('Please enter path to output CSV: ')
         if output_csv == 'quit':
             quit()
-        else:
-            fileob = open(output_csv, 'a', encoding='utf-8', newline='')
-            csvout = csv.writer(fileob)
-            logging.debug('Outfile opened: ' + output_csv)
-            return (fileob, csvout)
+        fileob = open(output_csv, 'a', encoding='utf-8', newline='')
+        csvout = csv.writer(fileob)
+        logging.debug('Outfile opened: ' + output_csv)
+        return (fileob, csvout)
     except Exception:
         logging.exception('Error: ')
         print('Error creating outfile. Please try again. Enter "quit" to exit')
@@ -98,11 +98,17 @@ def parse_dates():
         command = find_timetwister()
         csvfile = opencsv()
         fileobject, csvoutfile = opencsvout()
-        headers = ['date_id', 'URI', 'expression', 'original_string', 'index_dates', 'date_start', 
-            'date_end', 'date_start_full', 'date_end_full', 'inclusive_range', 'certainty']
+        yes_to_continue = input('Enter "Y" to split output into multiple spreadsheets by date type, or any key to continue: ')
+        headers = ['date_id', 'URI', 'expression', 'original_string', 'date_start', 'date_end']
         csvoutfile.writerow(headers)
+        #different date types
+        datadict = {'begin_single': [], 'inclusive':[], 'begin_inclusive': [], 'end_inclusive': [],
+                    'multiples': [], 'errors': [], 'unparsed': []}
         for row_number, row in enumerate(csvfile, 1):
             try:
+                counter_range = list(range(0, 5500000, 1000))
+                if row_number in counter_range:
+                    logging.debug('Row: ' + str(row_number))
                 date_id = row[0]
                 uri = row[1]
                 date_expression = row[2]
@@ -114,11 +120,16 @@ def parse_dates():
                 result_list = json.loads(process.stdout.read())
                 '''output stored in a list with one or more JSON items (timetwister can parse a single expression field 
                     into multiple dates, eachwith its own JSON bit); this comprehension loops through each JSON bit in the list
-                    (usually just the one), and then each kay/value in the JSON bit, and appends the values to the row of 
-                    input data (except for the test_data value)'''
+                    (usually just the one), and then each kay/value in the JSON bit, and appends the original, begin, and end 
+                    values to the row of input data'''
                 parse_json_into_list = [str(json_value) for json_bit in result_list 
-                                        for json_key, json_value in json_bit.items() if json_key != 'test_data']
-                row.extend(parse_json_into_list)             
+                                        for json_key, json_value in json_bit.items() 
+                                        if json_key in ['original_string', 'date_start', 'date_end']]
+                row.extend(parse_json_into_list)
+                if yes_to_continue == 'Y':
+                    proc = process_output(row, datadict)
+                else:
+                    continue
             except Exception as exc:
                  print(traceback.format_exc())
                  row.append('ERROR')
@@ -127,6 +138,13 @@ def parse_dates():
             finally:
                 csvoutfile.writerow(row)
     finally:
+        if 'proc' in vars():
+            for key, value in datadict.items():
+                fob, outfile = opencsvout(output_csv=key + '.csv')
+                outfile.writerow(headers + ['date_type_id'])
+                outfile.writerows(value)
+                fob.close()
+                logging.debug('Outfile closed: ' + key + '.csv')
         '''checks if these variables exist; if so does cleanup work no matter what else happens; if variables don't 
         exist there's something wrong with the input or output files'''
         if 'row_number' in vars():
@@ -136,16 +154,47 @@ def parse_dates():
             logging.debug('Outfile closed')
         keeptime(starttime)
 
+#Organizes output by date type
+def process_output(data_list, data_dictionary):
+    if len(data_list) > 6:
+        data_dictionary['multiples'].append(data_list)
+    elif len(data_list) < 6:
+        data_dictionary['errors'].append(data_list)
+    elif len(data_list) == 6:
+        date_begin = data_list[4]
+        date_end = data_list[5]
+        if date_begin == date_end:
+            if date_begin != 'None':
+                data_list.append('903')
+                data_dictionary['begin_single'].append(data_list)
+            else:
+                data_dictionary['unparsed'].append(data_list)
+        else:
+            if date_end == 'None' and date_begin != 'None':
+                data_list.append('905')
+                data_dictionary['begin_inclusive'].append(data_list)
+            if date_begin == 'None' and date_end != 'None':
+                data_list.append('905')
+                data_dictionary['end_inclusive'].append(data_list)
+            if date_begin != 'None' and date_end != 'None':
+                data_list.append('905')
+                data_dictionary['inclusive'].append(data_list)
+
+
 if __name__ == '__main__':        
     log_file_name = input('Please enter path to log file: ')
     error_log(filepath=log_file_name)
     try:
         logging.debug('Started')
-        parse_dates()
+        date_dict = parse_dates()
         logging.debug('Finished')
         print('All Done!')
     except (KeyboardInterrupt, SystemExit):
         logging.exception('Error: ')
         logging.debug('Aborted')
         print('Aborted!')
+
+'''To-Do
+Consider csvdicts
+'''
 
