@@ -16,16 +16,13 @@ from subprocess import Popen, PIPE
 
 #Sets up error logging; change logging level for more or less logging
 def error_log(filepath=None):
-    if sys.platform == "win32":
-        if filepath == None:
+    if filepath != None:
+        logger = filepath
+    else:
+        if sys.platform == "win32":
             logger = '\\Windows\\Temp\\error_log.log'
         else:
-            logger = filepath
-    else:
-        if filepath == None:
             logger = '/tmp/error_log.log'
-        else:
-            logger = filepath
     logging.basicConfig(filename=logger, level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(name)s %(message)s')
     return logger

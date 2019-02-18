@@ -1,0 +1,12 @@
+path_to_key: 'string'
+sql_hostname: 'string'
+sql_username: 'string'
+sql_password: 'string'
+sql_database: 'string'
+sql_port: 'integer'
+ssh_host: 'string'
+ssh_user: 'string'
+ssh_port: 'integer'
+input_dir: 'string'
+output_dir: 'string'
+exclusions: ['list', 'of', 'strings']

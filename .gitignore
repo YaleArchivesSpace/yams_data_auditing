@@ -3,6 +3,7 @@
 
 # Setuptools distribution folder.
 /dist/
+/build/
 
 # Python egg metadata, regenerated from source files by setuptools.
 /*.egg-info
@@ -12,7 +13,6 @@
 *.project
 *.pydevproject
 
-
 # My password file
 
 # System files
@@ -20,3 +20,13 @@
 
 #other
 *.README.md.html
+
+#DB config file
+*config.yml
+
+# pycache folder
+/__pycache__/
+
+/dates/test_sheets/
+
+
