@@ -183,11 +183,11 @@ Deletes unused enumeration values from the database.
 
 ### Dates
 
-See separate date [README](#/dates/README.md) for detailed instructions on running date auditing queries and normalization scripts.
+See separate date [README](https://github.com/YaleArchivesSpace/yams_data_auditing/blob/master/dates/README.md) for detailed instructions on running date auditing queries and normalization scripts.
 
 ### File Versions
 
-See separate file version [README](#/file_versions/README.md) for detailed instructions on running file version audit and update scripts.
+See separate file version [README](https://github.com/YaleArchivesSpace/yams_data_auditing/tree/master/file_versions/README.md) for detailed instructions on running file version audit and update scripts.
 
 ### Finding Aid as CSV
 
