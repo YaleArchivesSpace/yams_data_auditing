@@ -2,6 +2,8 @@
 
 A collection of scripts and queries for auditing and updating data in ArchivesSpace. Managed by the Yale Archival Management Systems committee (YAMS)
 
+This repository is in active development. See this [document](https://docs.google.com/document/d/19W15_yW1aFVy2Uzz9bLUGy_eNBiBXXHpKaC6pN738kM) for details on future additions to the auditing queries.
+
 ### Requirements
 
 * ArchivesSpace 2.4+
@@ -9,6 +11,7 @@ A collection of scripts and queries for auditing and updating data in ArchivesSp
 * `requests`
 * `sshtunnel`
 * `pymysql`
+* `utilities` local Python package
 
 ### Getting Started
 

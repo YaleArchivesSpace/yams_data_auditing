@@ -1,197 +1,347 @@
-#/usr/bin/python3
-#~/anaconda3/bin/python
+# /usr/bin/python3
+# ~/anaconda3/bin/python
 
-'''This script loops through an input CSV and runs Alex Duryee's Timetwister application against a 
-    CSV of unstructured date expressions. Written for use with the output of a date query against the 
-    ArchivesSpace database - 
-    https://github.com/YaleArchivesSpace/yams_data_auditing/blob/master/dates/get_unstructured_dates.sql
+'''This script loops through an input CSV and runs Alex Duryee's Timetwister application against a
+    CSV of unstructured date expressions. Written for use with the output of a date query against
+    the ArchivesSpace database
 
-    Written for OSX, but might work on a PC? Will test soon. Requires Ruby and the timetwister gem - 
+    Written for OSX, but might work on a PC? Will test soon. Requires Ruby and the timetwister gem
     https://github.com/alexduryee/timetwister'''
 
-import csv, json, logging, traceback, sys, shutil, time
-from subprocess import Popen, PIPE
+# To Check:
+# Faster with CSV or query?
 
-# A few logging, file handling functions
+#import cProfile
+import json
+import logging
+import traceback
+import shutil
+import multiprocessing
+import re
+import sys
+import time
+#import tracemalloc
+from functools import partial, wraps
+from subprocess import Popen, PIPE, DEVNULL
+from collections import defaultdict
+from utilities import utilities
+from utilities import db as dbssh
 
-#Sets up error logging; change logging level for more or less logging
-def error_log(filepath=None):
-    if filepath != None:
-        logger = filepath
-    else:
-        if sys.platform == "win32":
-            logger = '\\Windows\\Temp\\error_log.log'
-        else:
-            logger = '/tmp/error_log.log'
-    logging.basicConfig(filename=logger, level=logging.DEBUG,
-                        format='%(asctime)s %(levelname)s %(name)s %(message)s')
-    return logger
+# what about some pre-processing functions???
 
-#Open a CSV in reader mode
-def opencsv():
-    try:
-        input_csv = input('Please enter path to CSV: ')
-        if input_csv == 'quit':
-            quit()
-        else:
-            file = open(input_csv, 'r', encoding='utf-8')
-            csvin = csv.reader(file, quoting=csv.QUOTE_MINIMAL)
-            next(csvin)
-            logging.debug('File opened: ' + input_csv)
-            return csvin
-    except FileNotFoundError:
-        logging.exception('Error: ')
-        logging.debug('Trying again...')
-        print('CSV not found. Please try again. Enter "quit" to exit')
-        c = opencsv()
-        return c
+# Print iterations progress
 
-#Open a CSV file in writer mode
-def opencsvout(output_csv=None):
-    try:
-        if output_csv is None:
-            output_csv = input('Please enter path to output CSV: ')
-        if output_csv == 'quit':
-            quit()
-        fileob = open(output_csv, 'a', encoding='utf-8', newline='')
-        csvout = csv.writer(fileob)
-        logging.debug('Outfile opened: ' + output_csv)
-        return (fileob, csvout)
-    except Exception:
-        logging.exception('Error: ')
-        print('Error creating outfile. Please try again. Enter "quit" to exit')
-        f, c = opencsvout()
-        return (f, c)
 
-#Checks if application is installed before running
-def find_timetwister():
-    logging.debug('Checking requirements')
-    if shutil.which('timetwister') is None:
+def print_progress(iteration, total, prefix='', suffix='', bar_length=50):
+    # fix this so it only goes to one decimal
+    percents = f'{100 * (iteration / float(total)):.0f}'
+    filled_length = int(round(bar_length * iteration / float(total)))
+    bar = f'{"█" * filled_length}{"-" * (bar_length - filled_length)}'
+    sys.stdout.write(f'\r{prefix} |{bar}| {percents}% {suffix}')
+    # Print New Line on Complete
+    if iteration == total:
+        sys.stdout.write('\n')
+    sys.stdout.flush()
+
+
+def time_it(func):
+    """a decorator that times the execution of a function
+
+    TO DO - ADD A TIME PER RECORD CALCULATOR
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        elapsedtime = time.time() - start_time
+        m, s = divmod(elapsedtime, 60)
+        h, m = divmod(m, 60)
+        total_time = 'Total time elapsed: ' + '%d:%02d:%02d' % (h, m, s)
+        logging.debug(total_time)
+        print(total_time)
+        return result
+    return wrapper
+
+
+def find_timetwister(command='timetwister'):
+    '''Finds the Timetwister gem in the user's directory. A check to make sure
+    the gem is installed before the script tries to run it.
+
+    To-Do: add KeyboardInterrupt try/except; interoperability'''
+    if shutil.which(command) is None:
         logging.debug('Requirements not OK. Trying again.')
-        c = input('Could not find application. Please locate and try again. Enter "quit" to exit: ')
-        if c == 'quit':
+        command = input('Could not find application. Please try again. Enter "quit" to exit: ')
+        if command == 'quit':
             quit()
-        if shutil.which(c) is not None:
+        # this could be problematic
+        if shutil.which(command) is not None:
             logging.debug('Requirements OK')
-            return c
         else:
             find_timetwister()
     else:
         logging.debug('Requirements OK')
-        return 'timetwister'
+    return command
 
-#Keeps time
-def keeptime(start):
-    elapsedtime = time.time() - start
-    m, s = divmod(elapsedtime, 60)
-    h, m = divmod(m, 60)
-    logging.debug('Total time elapsed: ' + '%d:%02d:%02d' % (h, m, s))
 
-# Date parser Function
+def exclusions_dict():
+    '''Returns a dictionary containing various string patterns. Any date
+    expressions which match these strings will not be parsed by timetwister.
+    Excluding these in advance speeds up the program signficantly.'''
+    months = ("january |february |march |april |may |june |july |august |september |october "
+              "|november |december |jan |feb |mar |apr |jun |jul |aug |sep |sept |oct |nov |dec "
+              "|jan. |feb. |mar. |apr. |jun. |jul. |aug. |sep. |sept. |oct. |nov. |dec. ")
+    month_dd = f'^({months})[0-9]{{1,2}}$'
+    # this will get 1/1, 1/10, 12/1, 12/15
+    mm_dd = '^[0-9]{1,2}[/][0-9]{1,2}$'
+    return {'undated_variations': ['undated', 'Undated', 'n.d.', 'no date',
+                                   'No date', '[n.d.]', 'nd', 'unknown', 'unknown', 'n.d',
+                                   'n. d.', '[undated]', '[no date]', 'N.d.', 'n.y.', '?',
+                                   '0', 'Did Not Come', 'No Date', 'undated ', ' ', 'N/A',
+                                   'various', 'n.d,', 'no show', 'Unknown', 'undate',
+                                   'undated undated', 'various dates', '(undated)',
+                                   'No unitdate', 'Various', '-', '[no year]', '[n.s.]',
+                                   'Undated ', 'undated.', 'untitled', '[ca.', ' undated',
+                                   '(?)', '(var.)', '[?]', '[n.y.]', '[no date].', 'var.',
+                                   'Undated (2)', 'undatd', '[s.a.].', '[undated] [undated]',
+                                   'no dates', 'no year', 'various years', 'var. dates',
+                                   'unidentified', 'Varied dates', 'v.d.', ' n.d.',
+                                   ' no date', ' undated', '--', '.undated', '????',
+                                   '???', '??', '?-?', '(n.d.)', '', 's. a.', 's.a.',
+                                   '[n.d.].', 'y', 'x', 'xx', 'xxx', 'XXX', 'w', 'Various dates',
+                                   'uundated', 'udated', 'udnated', 'umdated', 'unated',
+                                   'uncated', 'undaetd', 'Undate', 'Undateable', 'undateed',
+                                   'undates', 'undatred', 'Undatted', 'undtaed', 'undted',
+                                   'Undted', 'Not dated', 'None', 'empty', 'dates', 'circa',
+                                   'Circa', 'circa [ ]', 'c', 'as dated', 'almost all undated',
+                                   'active'],
+            'months':  ['january', 'february', 'march', 'april', 'may', 'june',
+                        'july', 'august', 'september', 'october', 'november',
+                        'december', 'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                        'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'sept',
+                        'jan.', 'feb.', 'mar.', 'apr.', 'jun.', 'jul.', 'aug.',
+                        'sep.', 'sept.', 'oct.', 'nov.', 'dec.'],
+            'days':    ['monday', 'tuesday', 'wednesday', 'thursday', 'friday',
+                        'saturday', 'sunday', 'mon', 'tue', 'wed', 'thu', 'fri',
+                        'sat', 'sun'],
+            'seasons': ['spring', 'summer', 'fall', 'winter'],
+            'holidays': ['easter', 'christmas'],
+            'mm_dd_regex': mm_dd,
+            'month_dd_regex': month_dd}
 
-def parse_dates():
+
+def check_for_exclusions(date_expression, excl_dict):
+    '''Returns an expression which will be evaluated as True or False
+    against each date expression by the run_db_query function. If
+    False the date expression will be parsed, if not it will be skipped
+    and written to a CSV file. Takes the date expression and the exclusions
+    dictionary as parameters.'''
+    return (date_expression in excl_dict['undated_variations']
+            or date_expression.lower() in excl_dict['months']
+            or date_expression.lower() in excl_dict['days']
+            or date_expression.lower() in excl_dict['seasons']
+            or date_expression.lower().startswith('[n.y.]')
+            or date_expression.lower().startswith('[no year]')
+            or date_expression.lower().startswith('n.y.')
+            or date_expression.lower().startswith('no date')
+            or date_expression.lower().startswith('no year')
+            or date_expression.lower().startswith('[?]')
+            or date_expression.lower().startswith('undated')
+            or date_expression.lower().startswith('n.d.')
+            or date_expression.lower().startswith('?')
+            or date_expression.lower().startswith('?')
+            or date_expression.lower().startswith('[?')
+            or date_expression.lower().startswith('[no yr]')
+            or date_expression.lower().startswith('[unidentified year]')
+            or date_expression.lower().startswith('ptolemaic')
+            or date_expression.lower().startswith('roman')
+            or date_expression.lower().startswith('pharaonic')
+            or date_expression.lower().startswith('byzantine')
+            or re.match(excl_dict['mm_dd_regex'], date_expression.lower())
+            or re.match(excl_dict['month_dd_regex'], date_expression.lower()))
+
+
+def get_row_count(dbconn):
+    query_string = """
+    select count(*) as count
+    from date
+    WHERE (date.begin is null and date.end is null)
+    AND date.expression is not null
+    """
+    return dbconn.run_query_list(query_string)[0][0]
+
+
+def run_date_query(dbconn, filename, csvfile=None):
+    '''Runs the get_unstructured_dates query and checks the results against
+    the exclusions disctionary. If the date expression is not in the dictionary
+    it yields the query results. If the date expression is in the exclusions
+    dictionary the result is written to a CSV.'''
     try:
-        starttime = time.time()
-        command = find_timetwister()
-        csvfile = opencsv()
-        fileobject, csvoutfile = opencsvout()
-        yes_to_continue = input('Enter "Y" to split output into multiple spreadsheets by date type, or any key to continue: ')
-        headers = ['date_id', 'URI', 'expression', 'original_string', 'date_start', 'date_end']
-        csvoutfile.writerow(headers)
-        #different date types
-        datadict = {'begin_single': [], 'inclusive':[], 'begin_inclusive': [], 'end_inclusive': [],
-                    'multiples': [], 'errors': [], 'unparsed': []}
-        for row_number, row in enumerate(csvfile, 1):
-            try:
-                counter_range = list(range(0, 5500000, 1000))
-                if row_number in counter_range:
-                    logging.debug('Row: ' + str(row_number))
-                date_id = row[0]
-                uri = row[1]
-                date_expression = row[2]
-                #uncomment for even more logging
-                #logging.debug('Working on row ' + str(row_number) + ': ' + uri + ' ' + date_id)
-                #runs timetwister against each date expression
-                process = Popen([command, str(date_expression)], stdout=PIPE, encoding='utf-8')
-                #first reads the output and then converts the list items into JSON
-                result_list = json.loads(process.stdout.read())
-                '''output stored in a list with one or more JSON items (timetwister can parse a single expression field 
-                    into multiple dates, eachwith its own JSON bit); this comprehension loops through each JSON bit in the list
-                    (usually just the one), and then each kay/value in the JSON bit, and appends the original, begin, and end 
-                    values to the row of input data'''
-                parse_json_into_list = [str(json_value) for json_bit in result_list 
-                                        for json_key, json_value in json_bit.items() 
-                                        if json_key in ['original_string', 'date_start', 'date_end']]
-                row.extend(parse_json_into_list)
-                if yes_to_continue == 'Y':
-                    proc = process_output(row, datadict)
-                else:
-                    continue
-            except Exception as exc:
-                 print(traceback.format_exc())
-                 row.append('ERROR')
-                 logging.debug(date_id + ' ' + uri)
-                 logging.exception('Error: ')
-            finally:
-                csvoutfile.writerow(row)
+        #open_query = open('get_unstructured_dates.sql', 'r', encoding='utf-8')
+        logging.debug('Query started')
+        #query_data = dbconn.write_query_gen(open_query.read())
+        #query_data = dbconn.write_query_df(open_query.read(), filename)
+        query_data = "/Users/aliciadetelich/Dropbox/git/yams_data_auditing/dates/unparsed_input.csv"
+        header_row, csvfile = utilities.opencsv(input_csv=query_data)
+        logging.debug('Query finished')
+        # return query_data
+    except Exception:
+        print(traceback.format_exc())
+        logging.exception('Error: ')
     finally:
-        if 'proc' in vars():
-            for key, value in datadict.items():
-                fob, outfile = opencsvout(output_csv=key + '.csv')
-                outfile.writerow(headers + ['date_type_id'])
-                outfile.writerows(value)
-                fob.close()
-                logging.debug('Outfile closed: ' + key + '.csv')
-        '''checks if these variables exist; if so does cleanup work no matter what else happens; if variables don't 
-        exist there's something wrong with the input or output files'''
-        if 'row_number' in vars():
-            logging.debug('Last row: ' + str(row_number) + ' ' + date_id + ' ' + uri)
-        if 'fileobject' in vars():
-            fileobject.close()
-            logging.debug('Outfile closed')
-        keeptime(starttime)
+        dbconn.close_conn()
+        logging.debug('Connection closed')
+    return csvfile
 
-#Organizes output by date type
-def process_output(data_list, data_dictionary):
-    if len(data_list) > 6:
-        data_dictionary['multiples'].append(data_list)
-    elif len(data_list) < 6:
-        data_dictionary['errors'].append(data_list)
-    elif len(data_list) == 6:
-        date_begin = data_list[4]
-        date_end = data_list[5]
+
+def parse_dates(query_row, exclusions_d, counter, row_count):
+    '''Parses each date expression.'''
+    # This works, but it has a lot of performance overhead. Might be a trade-off, otherwise
+    # not sure how to indicate progress, which for a CSV with 350k rows is really necessary
+    counter[0] += 1
+    print_progress(counter[0], row_count, suffix=f'/{row_count}')
+    try:
+        date_expression = query_row[2]
+        #exclusions_results = check_for_exclusions(query_row[2], exclusions_d)
+        #if exclusions_results is None:
+        process = Popen(['timetwister', str(date_expression)], stdout=PIPE, stderr=DEVNULL,
+                        encoding='utf-8')
+        result_list = json.loads(process.stdout.read())
+        parse_json_into_tuple = [str(json_value) for json_bit in result_list
+                                 for json_key, json_value in json_bit.items()
+                                 if json_key in ['original_string', 'date_start', 'date_end']]
+        query_row.extend(parse_json_into_tuple)
+        # elif (exclusions_results is True or isinstance(exclusions_results, re.Match) is True):
+    except Exception:
+        print(traceback.format_exc())
+        query_row.append("ERROR")
+        logging.exception('Error: ')
+        logging.debug(query_row)
+    return query_row
+
+
+def date_type_dict():
+    '''Opens all the various types of CSVs that we'll be writing to and stores
+    the files for use later.'''
+    date_type_csvs = defaultdict(list)
+    date_types = ['parsed_date_expressions', 'inclusive', 'begin_single', 'begin_inclusive',
+                  'end_inclusive', 'unparsed', 'multiples', 'skipped']
+    for date_type in date_types:
+        fileobject, csvoutfile = utilities.opencsvout(date_type + '.csv')
+        csvoutfile.writerow(['id', 'uri', 'expression', 'original_string', 'begin', 'end',
+                             'date_type_id'])
+        date_type_csvs[date_type].extend([fileobject, csvoutfile])
+    return date_type_csvs
+
+
+def process_output_helper(result, csv_store, report_type, date_type_id=None):
+    '''Helper function for process_output function'''
+    if date_type_id is not None:
+        result.append(date_type_id)
+    csv_file = csv_store[report_type][1]
+    csv_file.writerow(result)
+
+
+def process_output(result, csv_store):
+    '''Processes input and writes to a series of CSV files.'''
+    if len(result) > 6:
+        process_output_helper(result, csv_store, 'multiples')
+    elif len(result) < 6:
+        # this will get all the skipped expressions and all timetwister errors
+        process_output_helper(result, csv_store, 'skipped')
+    elif len(result) == 6:
+        # all parsed date expressions - i.e. the ones that were run through the
+        # parser - except for the multipes
+        process_output_helper(result, csv_store, 'parsed_date_expressions')
+        date_begin = result[4]
+        date_end = result[5]
         if date_begin == date_end:
             if date_begin != 'None':
-                data_list.append('903')
-                data_dictionary['begin_single'].append(data_list)
-            else:
-                data_dictionary['unparsed'].append(data_list)
-        else:
+                process_output_helper(result, csv_store, 'begin_single', '903')
+            elif date_begin == 'None':
+                process_output_helper(result, csv_store, 'unparsed')
+        elif date_begin != date_end:
             if date_end == 'None' and date_begin != 'None':
-                data_list.append('905')
-                data_dictionary['begin_inclusive'].append(data_list)
-            if date_begin == 'None' and date_end != 'None':
-                data_list.append('905')
-                data_dictionary['end_inclusive'].append(data_list)
-            if date_begin != 'None' and date_end != 'None':
-                data_list.append('905')
-                data_dictionary['inclusive'].append(data_list)
+                process_output_helper(result, csv_store, 'begin_inclusive', '905')
+            elif date_begin == 'None' and date_end != 'None':
+                process_output_helper(result, csv_store, 'end_inclusive', '905')
+            elif date_begin != 'None' and date_end != 'None':
+                process_output_helper(result, csv_store, 'inclusive', '905')
 
 
-if __name__ == '__main__':        
-    log_file_name = input('Please enter path to log file: ')
-    error_log(filepath=log_file_name)
+@time_it
+def main():
+    '''Bringing it all together.
+    TODO: user input to get chunksize value'''
+    # log_file_name = input('Please enter path to log file: ')
+    utilities.error_log(filepath='parse_date_test_log.log')
     try:
-        logging.debug('Started')
-        date_dict = parse_dates()
-        logging.debug('Finished')
-        print('All Done!')
+        man = multiprocessing.Manager()
+        counter = man.list([0])
+        exclusions_d = exclusions_dict()
+        dbconn = dbssh.DBConn()
+        logging.debug(dbconn.sql_database)
+        command = find_timetwister()
+        #max_rows = get_row_count(dbconn)[0]
+        max_rows = sum(1 for line in open("/Users/aliciadetelich/Dropbox/git/yams_data_auditing/dates/unparsed_input.csv").readlines()) - 1
+        print(max_rows)
+        #max_rows = 10000
+        chunks = int(max_rows * .05)
+        logging.debug('Row count: ' + str(max_rows))
+        logging.debug('Chunksize: ' + str(chunks))
+        csv_store = date_type_dict()
+        if command == 'timetwister':
+            logging.debug('Parsing started')
+            with multiprocessing.Pool() as pool:
+                print_progress(counter[0], max_rows, prefix='', suffix=f'/{max_rows}')
+                data_output = pool.imap_unordered(partial(parse_dates, exclusions_d=exclusions_d, counter=counter, row_count=max_rows), run_date_query(
+                    dbconn, filename='all_date_expressions.csv'), chunksize=chunks)
+                logging.debug('Processing started')
+                for item in data_output:
+                    process_output(item, csv_store)
+                logging.debug('Processing finished')
+            logging.debug('Parsing finished')
+            print('\n' + 'All Done!')
     except (KeyboardInterrupt, SystemExit):
+        # make sure that this is working when pressing CTRL Z in both Atom and Terminal
         logging.exception('Error: ')
         logging.debug('Aborted')
         print('Aborted!')
+    except Exception:
+        logging.exception('Error: ')
+        print(traceback.format_exc())
+    finally:
+        # this closes all of the CSVs in the dict
+        for value in csv_store.values():
+            value[0].close()
+        logging.debug('Outfiles closed')
 
-'''To-Do
-Consider csvdicts
-'''
 
+#tracemalloc.start()
+
+if __name__ == '__main__':
+    main()
+
+# snapshot = tracemalloc.take_snapshot()
+# statistics = snapshot.statistics('lineno')
+# for statistic in statistics:
+#     logging.debug(str(statistic))
+
+# NOTE: aborted successfully with CTRL-C; does not work with CTRL-Z
+
+# test db has 346726 unparsed dates
+# 344.8 rows per minute when not suppressing deprecation warnings and only including dates
+# not in exclusion list on CSV 449.5 rows per minute when not suppressing deprecation
+# warnings and including all dates (but skipping those in exlcusion list before parsing)
+# Almost 800 per minute when I did this in January - maybe running through the parser
+# is no slower than doing the if checks? Or maybe the changes I've made slowed things down?
+# Over 900 per minute with the multiprocessing module and not skipping anything...and also
+# printing everything...and like a billion processes still running...
+# 1724 per minute with multiprocessing and skipping and not printing - 50k, 10k chunk size
+# scaled up to all 346k it did ~1450 per minute (chunksize 75k)
+# with the separated CSVs, 5k records chunksize 1000: 1428 per minute
+# 1851 per minute - 200k chunksize 10k
+# 1561 per minute - 346k chunksize 10k
+# 1444 per minute - 346k chunksize 40k
+# 1210 per minute - 25k chunksize 5k with progress bar; did change a lot of other things, too, though...
+# 1444 per minute - all records - 10k chunksize
+# 1389 per minute all records - 20k chunksize

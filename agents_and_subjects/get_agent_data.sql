@@ -1,8 +1,5 @@
 /* select * from name_person
 where rest_of_name is null */
-
-#BETTER WAY TO GET NAMES
-
 select CAST(ap.id as unsigned) as id
 	, CONCAT('/agents/people/', np.agent_person_id) as agent_uri
 	, np.sort_name as sort_name

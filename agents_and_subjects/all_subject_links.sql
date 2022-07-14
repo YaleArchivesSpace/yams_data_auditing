@@ -28,3 +28,11 @@ FROM subject_rlshp sr
 JOIN subject on sr.subject_id = subject.id
 JOIN accession on sr.accession_id = accession.id
 ORDER BY subject
+
+
+#To include terms
+#	, term.term as term
+#	, ev.value as subject_term_type
+#left join subject_term on subject.id = subject_term.subject_id
+#left join term on term.id = subject_term.term_id
+#left join enumeration_value ev on ev.id = term.term_type_id

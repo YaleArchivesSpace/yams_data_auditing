@@ -27,6 +27,8 @@
 # pycache folder
 /__pycache__/
 
-/dates/test_sheets/
+dates/test_sheets/
+dates/config.yml
+config.yml
 
 

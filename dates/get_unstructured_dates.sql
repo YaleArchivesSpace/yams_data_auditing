@@ -120,3 +120,4 @@ JOIN date on e.id = date.event_id
 WHERE date.expression IS NOT NULL
 AND date.begin IS NULL
 AND date.end IS NULL
+#LIMIT 10000
