@@ -9,6 +9,7 @@
     Written for OSX, but might work on a PC? Will test soon. Requires Ruby and the timetwister gem - 
     https://github.com/alexduryee/timetwister'''
 
+<<<<<<< HEAD
 import csv, json, logging, traceback, sys, shutil, time, os
 from collections import defaultdict
 from subprocess import Popen, PIPE, DEVNULL
@@ -43,11 +44,29 @@ def run_db_query(query_data=None):
     finally:
         as_db.close_conn()
         return query_data
+=======
+import csv, json, logging, traceback, sys, shutil, time
+from subprocess import Popen, PIPE
+from utilities import utilities, dbssh
+
+'''question: would it be faster to save this into a CSV and then open the CSV?? That way it'd be stored in a generator
+rather than a list.'''
+def run_db_query():
+    config_file = utilities.get_config()
+    as_db = dbssh.DBConn(config_file=config_file)
+    open_query = open('get_unstructured_dates.sql', 'r', encoding='utf-8')
+    query_data = as_db.run_query(open_query.read())
+    q = query_data.values.tolist()
+    return q
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
 
 #Checks if application is installed before running
 def find_timetwister():
     logging.debug('Checking requirements')
+<<<<<<< HEAD
     #if not ...?
+=======
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
     if shutil.which('timetwister') is None:
         logging.debug('Requirements not OK. Trying again.')
         c = input('Could not find application. Please locate and try again. Enter "quit" to exit: ')
@@ -63,6 +82,7 @@ def find_timetwister():
         return 'timetwister'
 
 # Date parser Function
+<<<<<<< HEAD
 def parse_dates(command, query_data, fileobject, csvoutfile):
     try:
         #starttime = time.time()
@@ -74,13 +94,32 @@ def parse_dates(command, query_data, fileobject, csvoutfile):
         for row_number, row in enumerate(query_data, 1):
             try:
                 counter_range = range(0, 5500000, 1000)
+=======
+def parse_dates():
+    try:
+        #starttime = time.time()
+        command = find_timetwister()
+        #header_row, csvfile = utilities.opencsv()
+        fileobject, csvoutfile = utilities.opencsvout(output_csv='parsed_date_expressions.csv')
+        q_data = run_db_query()
+        yes_to_continue = input('Enter "Y" to split output into multiple spreadsheets by date type, or any key to continue: ')
+        headers = ['date_id', 'uri', 'expression', 'original_string', 'date_start', 'date_end']
+        csvoutfile.writerow(headers)
+        for row_number, row in enumerate(q_data, 1):
+            try:
+                counter_range = list(range(0, 5500000, 1000))
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
                 if row_number in counter_range:
                     logging.debug('Row: ' + str(row_number))
                 date_id = row[0]
                 uri = row[1]
                 date_expression = row[2]
                 #runs timetwister against each date expression
+<<<<<<< HEAD
                 process = Popen([command, str(date_expression)], stdout=PIPE, stderr=DEVNULL, encoding='utf-8')
+=======
+                process = Popen([command, str(date_expression)], stdout=PIPE, encoding='utf-8')
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
                 #first reads the output and then converts the list items into JSON
                 result_list = json.loads(process.stdout.read())
                 '''output stored in a list with one or more JSON items (timetwister can parse a 
@@ -88,22 +127,39 @@ def parse_dates(command, query_data, fileobject, csvoutfile):
                     comprehension loops through each JSON bit in the list (usually just the one), 
                     and then each kay/value in the JSON bit, and appends the original, begin, and end 
                     values to the row of input data'''
+<<<<<<< HEAD
                 parse_json_into_list = tuple(str(json_value) for json_bit in result_list 
                                         for json_key, json_value in json_bit.items() 
                                         if json_key in ['original_string', 'date_start', 'date_end'])
                 new_row = row + parse_json_into_list
                 if yes_to_continue == 'Y':
                     proc = process_output(new_row, datadict)
+=======
+                parse_json_into_list = [str(json_value) for json_bit in result_list 
+                                        for json_key, json_value in json_bit.items() 
+                                        if json_key in ['original_string', 'date_start', 'date_end']]
+                row.extend(parse_json_into_list)
+                if yes_to_continue == 'Y':
+                    proc = process_output(row, datadict)
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
                 else:
                     continue
             except Exception as exc:
                  print(traceback.format_exc())
+<<<<<<< HEAD
                  row.append('ERROR')
+=======
+                 row.extend(['ERROR'])
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
                  if date_id:
                     logging.debug(date_id + ' ' + uri)
                  logging.exception('Error: ')
             finally:
+<<<<<<< HEAD
                 csvoutfile.writerow(new_row)
+=======
+                csvoutfile.writerow(row)
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
     finally:
         '''This is for creating multiple CSV files from the original file. I guess it also creates a single file??'''
         if 'proc' in vars():
@@ -126,7 +182,12 @@ def parse_dates(command, query_data, fileobject, csvoutfile):
 #Organizes output by date type
 def process_output(data_list):
     #use a default_dict here???
+<<<<<<< HEAD
     data_dictionary = defaultdict(list)
+=======
+    data_dictionary = {'begin_single': [], 'inclusive':[], 'begin_inclusive': [], 'end_inclusive': [],
+                    'multiples': [], 'errors': [], 'unparsed': []}
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
     if len(data_list) > 6:
         data_dictionary['multiples'].append(data_list)
     elif len(data_list) < 6:
@@ -153,16 +214,23 @@ def process_output(data_list):
 
 #@utilities.keeptime
 def main():
+<<<<<<< HEAD
     command = find_timetwister()
     fileobject, csvoutfile = utilities.opencsvout(output_csv='parsed_date_expressions.csv')
     #config_file = utilities.get_config(cfg='/Users/aliciadetelich/as_tools_config.yml')
     q_data = run_db_query()
     #need to pull stuff out of the parse_dates function into main function.
+=======
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
     log_file_name = input('Please enter path to log file: ')
     utilities.error_log(filepath=log_file_name)
     try:
         logging.debug('Started')
+<<<<<<< HEAD
         parse_dates(command, q_data, fileobject, csvoutfile)
+=======
+        parse_dates()
+>>>>>>> 43f28705bdf16cf5f688d226d1019d09a1312b7b
         logging.debug('Finished')
         print('All Done!')
     except (KeyboardInterrupt, SystemExit):
